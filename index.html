@@ -450,153 +450,56 @@ function renderDining(rows) {
   return '<div class="sec-head">Dining &amp; Bars</div><div class="card-grid">' + cards + '</div>';
 }
 
-function renderOffers(rows) {
-  // Fix shifted headers: detect when row 0 values are the real column names
-  if (rows.length > 0) {
-    var keys = Object.keys(rows[0]);
-    var vals = keys.map(function(k) { return (rows[0][k] || '').toString().trim(); });
-    if (keys.indexOf('Title') === -1 && vals.indexOf('Title') !== -1) {
-      rows = rows.slice(1).map(function(r) {
-        var n = {};
-        keys.forEach(function(k, i) { if (vals[i]) n[vals[i]] = (r[k] || '').toString().trim(); });
-        return n;
-      });
+function parseCSV(text) {
+  var rows = [];
+  var row = [];
+  var value = '';
+  var insideQuotes = false;
+
+  for (var i = 0; i < text.length; i++) {
+    var c = text[i];
+    var next = text[i + 1];
+
+    if (c === '"' && insideQuotes && next === '"') {
+      value += '"';
+      i++;
+    } 
+    else if (c === '"') {
+      insideQuotes = !insideQuotes;
+    } 
+    else if (c === ',' && !insideQuotes) {
+      row.push(value.trim());
+      value = '';
+    } 
+    else if ((c === '\n' || c === '\r') && !insideQuotes) {
+      if (value || row.length) {
+        row.push(value.trim());
+        rows.push(row);
+      }
+      row = [];
+      value = '';
+    } 
+    else {
+      value += c;
     }
   }
 
-  var offerRows = rows.filter(function(r) { return (r['Title'] || r['title'] || r['Offer'] || '').trim(); });
-  if (!offerRows.length) return '<div class="sec-head">Exclusive Offers</div>'
-    + '<div class="error-box"><div class="error-sub">No offers available at this time.</div></div>';
-
-  return '<div class="sec-head">Exclusive Offers</div>'
-    + offerRows.map(function(r) {
-        var link     = (r['Link'] || '').trim();
-        var tag      = link ? 'a class="offer-card offer-card-link" href="' + link + '" target="_blank" rel="noopener"' : 'div class="offer-card"';
-        var closeTag = link ? 'a' : 'div';
-        var arrow    = link ? '<div class="offer-arrow">&#8599;</div>' : '';
-        return '<' + tag + '>'
-          + '<div class="offer-icon">' + (r['Icon'] || '&#127873;') + '</div>'
-          + '<div style="flex:1">'
-          + '<div class="offer-title">' + r['Title'] + '</div>'
-          + '<div class="offer-detail">' + (r['Detail'] || '') + '</div>'
-          + (r['Time']  ? '<div class="offer-detail" style="margin-top:4px">' + r['Time'] + '</div>' : '')
-          + (r['Price'] ? '<span class="offer-price">' + r['Price'] + '</span>' : '')
-          + '</div>' + arrow + '</' + closeTag + '>';
-      }).join('');
-}
-
-function renderPackages(rows) {
-  // Fix merged-cell key: "Restaurant    Cinnamon" contains restaurant name
-  rows = rows.map(function(r) {
-    var fixed = {};
-    Object.keys(r).forEach(function(k) {
-      var clean = k.replace(/[ \t]+/g, ' ').trim();
-      if (clean.indexOf('Restaurant') === 0 && clean.length > 10) {
-        fixed['Restaurant'] = clean.slice(10).trim();
-        Object.keys(r).forEach(function(k2) {
-          if (k2 !== k) {
-            var ck = k2.replace(/[ \t]+/g,' ').trim();
-            if (ck) fixed[ck] = (r[k2] || '').toString().trim();
-          }
-        });
-      } else {
-        if (clean && !(clean in fixed)) fixed[clean] = (r[k] || '').toString().trim();
-      }
-    });
-    return fixed;
-  });
-
-  // Build status map
-  var lastRest = '', statusMap = {};
-  rows.forEach(function(r) {
-    var rest   = (r['Restaurant'] || '').trim();
-    var status = (r['Status'] || '').trim();
-    if (rest) lastRest = rest;
-    if (status && lastRest) statusMap[lastRest] = status;
-  });
-
-  var closedRestaurants = {};
-  Object.keys(statusMap).forEach(function(k) {
-    if (statusMap[k].toUpperCase() === 'CLOSED') closedRestaurants[k] = true;
-  });
-
-  // Fill down and collect data rows
-  lastRest = '';
-  var dataRows = [];
-  rows.forEach(function(r) {
-    var rest = (r['Restaurant'] || '').trim();
-    var meal = (r['Meal Period'] || r['Meal Period / Service'] || '').trim();
-    if (rest) lastRest = rest;
-    if (!lastRest || !meal) return;
-    if (closedRestaurants[lastRest]) return;
-    if (meal.indexOf('add details') !== -1) return;
-    dataRows.push({
-      rest: lastRest,
-      meal: meal,
-      time: (r['Time'] || r['Timing'] || '').trim(),
-      desc: (r['Description'] || r['Notes'] || '').trim(),
-      ai:   (r['AI'] || '').trim(),
-      uai:  (r['UAI'] || '').trim()
-    });
-  });
-
-  var infoRows = rows.filter(function(r) {
-    return (r['Restaurant'] || '').toString().trim().charAt(0) === '•';
-  });
-
-  var restaurants = [], seen = {};
-  dataRows.forEach(function(r) {
-    if (!seen[r.rest]) { seen[r.rest] = true; restaurants.push(r.rest); }
-  });
-
-  function renderCell(val) {
-    val = (val || '').trim();
-    if (!val || val.toUpperCase() === 'FALSE') return '<td class="pkg-cross">&#8212;</td>';
-    if (val.toUpperCase() === 'TRUE')           return '<td class="pkg-check">&#10003;</td>';
-    if (val.toUpperCase() === 'CHARGEABLE')     return '<td class="pkg-charge">CHARGED</td>';
-    return '<td class="pkg-custom"><span>' + val + '</span></td>';
+  if (value || row.length) {
+    row.push(value.trim());
+    rows.push(row);
   }
 
-  if (!restaurants.length) return '<div class="sec-head">Meal Packages</div>'
-    + '<div class="error-box"><div class="error-sub">No packages currently available.</div></div>';
+  if (!rows.length) return [];
 
-  var tableRows = restaurants.map(function(name) {
-    var group = dataRows.filter(function(r) { return r.rest === name; });
-    var restRow = '<tr class="pkg-restaurant-row">'
-      + '<td class="pkg-col-sticky" style="color:#073B4C"><strong>' + name + '</strong></td>'
-      + '<td colspan="4"></td></tr>';
-    var dataHtml = group.map(function(r) {
-      return '<tr>'
-        + '<td class="pkg-col-sticky pkg-meal">' + r.meal + '</td>'
-        + '<td class="pkg-time">' + r.time + '</td>'
-        + '<td class="pkg-desc">' + r.desc + '</td>'
-        + renderCell(r.ai) + renderCell(r.uai) + '</tr>';
-    }).join('');
-    return restRow + dataHtml;
-  }).join('');
+  var headers = rows.shift();
 
-  var infoHtml = infoRows.length
-    ? '<div class="pkg-info-box"><div class="pkg-info-title">Important Information</div>'
-      + infoRows.map(function(r) {
-          return '<div class="pkg-info-item">'
-            + (r['Restaurant'] || '').trim().replace(/^•\s*/, '') + '</div>';
-        }).join('') + '</div>'
-    : '';
-
-  return '<div class="sec-head">Meal Packages</div>'
-    + '<div style="background:var(--white);border-radius:var(--radius);box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:.875rem;overflow:hidden">'
-    + '<div style="display:flex;align-items:center;justify-content:flex-end;gap:5px;font-size:11px;color:var(--text-light);padding:5px 12px;background:var(--sand);border-bottom:1px solid var(--sand-dark)">Slide for more &#187;</div>'
-    + '<div id="pkgScrollWrap" onscroll="pkgScroll(this)" style="overflow-x:auto;-webkit-overflow-scrolling:touch">'
-    + '<table style="width:100%;border-collapse:collapse;font-size:13px;min-width:520px;background:var(--white)">'
-    + '<thead><tr style="background:#073B4C">'
-    + '<th style="padding:.65rem .875rem;color:#fff;font-weight:500;font-size:12px;text-align:left;position:sticky;left:0;z-index:3;background:#073B4C;min-width:130px;border-right:2px solid rgba(255,255,255,.2)">Meal Period</th>'
-    + '<th style="padding:.65rem .875rem;color:#fff;font-weight:500;font-size:12px;text-align:left;white-space:nowrap">Time</th>'
-    + '<th style="padding:.65rem .875rem;color:#fff;font-weight:500;font-size:12px;text-align:left">Description</th>'
-    + '<th style="padding:.65rem .875rem;font-weight:600;font-size:12px;text-align:center;background:linear-gradient(135deg,#8a9099,#BCC2C8,#E2E6EA,#BCC2C8,#8a9099);color:#2a2a2a;min-width:60px">AI</th>'
-    + '<th style="padding:.65rem .875rem;font-weight:600;font-size:12px;text-align:center;background:linear-gradient(135deg,#B8860B,#DAA520,#F0D060,#DAA520,#B8860B);color:#5a3d00;min-width:60px">UAI</th>'
-    + '</tr></thead>'
-    + '<tbody>' + tableRows + '</tbody>'
-    + '</table></div></div>' + infoHtml;
+  return rows.map(function(r) {
+    var obj = {};
+    headers.forEach(function(h, i) {
+      obj[h.trim()] = (r[i] || '').trim();
+    });
+    return obj;
+  });
 }
 
 function pkgScroll(el) { var hint = document.getElementById('pkgHint'); if (hint) hint.style.opacity = el.scrollLeft > 20 ? '0' : '1'; }
