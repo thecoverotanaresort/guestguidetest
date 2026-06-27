@@ -451,6 +451,21 @@ function renderDining(rows) {
 }
 
 function renderOffers(rows) {
+  // Fix: detect if column keys are wrong (e.g. first key is an emoji icon, not 'Icon')
+  // This happens when the Offers tab has its real headers shifted down by one row.
+  if (rows.length > 0) {
+    var keys = Object.keys(rows[0]);
+    // If 'Title' is not a key but appears as a VALUE in row 0, remap
+    if (keys.indexOf('Title') === -1 && keys.indexOf('Icon') === -1) {
+      // Use values of row 0 as the real headers
+      var realHeaders = keys.map(function(k) { return (rows[0][k] || '').toString().trim(); });
+      rows = rows.slice(1).map(function(r) {
+        var n = {};
+        keys.forEach(function(k, i) { if (realHeaders[i]) n[realHeaders[i]] = (r[k] || '').toString().trim(); });
+        return n;
+      });
+    }
+  }
   var offerRows = rows.filter(function(r) { return r.Title && r.Title.trim(); });
   if (!offerRows.length) return '<div class="sec-head">Exclusive Offers</div><div class="error-box"><div class="error-sub">No offers available at this time.</div></div>';
   return '<div class="sec-head">Exclusive Offers</div>'
@@ -473,6 +488,25 @@ function renderOffers(rows) {
 }
 
 function renderPackages(rows) {
+  // Fix merged-cell artefact: key like "Restaurant    Cinnamon" contains restaurant name
+  rows = rows.map(function(r) {
+    var fixed = {};
+    Object.keys(r).forEach(function(k) {
+      var clean = k.replace(/\s+/g, ' ').trim();
+      if (clean.slice(0, 10) === 'Restaurant' && clean.length > 10) {
+        // Embedded restaurant name in key
+        fixed['Restaurant'] = clean.slice(10).trim();
+        // Copy remaining columns
+        Object.keys(r).forEach(function(k2) {
+          if (k2 !== k) fixed[k2.replace(/\s+/g,' ').trim()] = (r[k2] || '').toString().trim();
+        });
+      } else {
+        if (!(clean in fixed)) fixed[clean] = (r[k] || '').toString().trim();
+      }
+    });
+    return fixed;
+  });
+
   // Fill down Restaurant and Status
   var lastRest = '', lastStatus = 'Open';
   var statusMap = {};
