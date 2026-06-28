@@ -392,10 +392,21 @@ async function fetchSheet(tabName) {
 function renderDining(rows) {
   // Columns: Restaurant | Status | Operating Hours (optional) | Meal Period | Time | Description (or Notes)
   var lastRest = '', lastStatus = 'Open', lastHours = '';
+
+  // Find the Operating Hours column name flexibly (handles variations in naming)
+  var hoursColName = '';
+  if (rows.length > 0) {
+    Object.keys(rows[0]).forEach(function(k) {
+      var kl = k.toLowerCase();
+      if (kl.indexOf('hour') !== -1 || kl.indexOf('operating') !== -1) hoursColName = k;
+    });
+  }
+  console.log('[DEBUG dining] Hours column found:', hoursColName || 'NONE', '| All columns:', Object.keys(rows[0]||{}).join(', '));
+
   rows = rows.map(function(r) {
     var rest   = String(r['Restaurant']||'').trim();
     var status = String(r['Status']||'').trim();
-    var hours  = String(r['Operating Hours']||r['Hours']||'').trim();
+    var hours  = String(r[hoursColName]||r['Operating Hours']||r['Operating hours']||r['Hours']||'').trim();
     if (rest)   lastRest   = rest;
     if (status) lastStatus = status;
     if (hours)  lastHours  = hours;
@@ -541,13 +552,17 @@ function renderPackages(rows) {
     if (statusMap[k].toUpperCase() === 'CLOSED') closed[k] = true;
   });
 
-  // Fill-down and collect data rows
+  // Fill-down and collect data rows (including Operating Hours)
   lastR = '';
+  var lastHours = '';
+  var hoursMap = {};
   var dataRows = [];
   rows.forEach(function(r) {
-    var rest = String(r['Restaurant']||'').trim();
-    var meal = String(r['Meal Period']||r['Meal Period / Service']||'').trim();
+    var rest  = String(r['Restaurant']||'').trim();
+    var hours = String(r['Operating Hours']||r['Hours']||'').trim();
+    var meal  = String(r['Meal Period']||r['Meal Period / Service']||'').trim();
     if (rest && rest.charAt(0) !== '•') lastR = rest;
+    if (hours) { lastHours = hours; hoursMap[lastR] = hours; }
     if (!lastR || !meal || closed[lastR] || meal.indexOf('add details') !== -1) return;
     dataRows.push({
       rest: lastR, meal: meal,
@@ -594,7 +609,8 @@ function renderPackages(rows) {
 
   var tbody = restaurants.map(function(name) {
     var g = dataRows.filter(function(r){return r.rest===name;});
-    return '<tr class="pkg-restaurant-row"><td class="pkg-col-sticky" style="color:#073B4C"><strong>'+name+'</strong></td><td colspan="4"></td></tr>'
+    var hrs = hoursMap[name] ? '<div class="pkg-hours">'+hoursMap[name]+'</div>' : '';
+    return '<tr class="pkg-restaurant-row"><td class="pkg-col-sticky" style="color:#073B4C"><strong>'+name+'</strong>'+hrs+'</td><td colspan="4"></td></tr>'
       + g.map(function(r){
           return '<tr><td class="pkg-col-sticky pkg-meal">'+r.meal+'</td><td class="pkg-time">'+r.time+'</td><td class="pkg-desc">'+r.desc+'</td>'+rc(r.ai)+rc(r.uai)+'</tr>';
         }).join('');
