@@ -265,6 +265,7 @@
   .match-datetime { text-align: right; }
   .match-date { font-size: 12px; font-weight: 500; color: #073B4C; }
   .match-time { font-size: 11px; color: var(--text-light); margin-top: 1px; }
+  .card-hours { font-size: 11px; color: var(--text-light); margin-top: 2px; margin-bottom: 2px; }
 </style>
 </head>
 <body>
@@ -389,38 +390,51 @@ async function fetchSheet(tabName) {
 }
 
 function renderDining(rows) {
-  // Columns: Restaurant | Status | Meal Period | Time | Description | AI | UAI
-  // Fill down Restaurant and Status
-  var lastRest = '', lastStatus = 'Open';
+  // Columns: Restaurant | Status | Operating Hours (optional) | Meal Period | Time | Description (or Notes)
+  var lastRest = '', lastStatus = 'Open', lastHours = '';
   rows = rows.map(function(r) {
-    var rest   = (r['Restaurant'] || '').trim();
-    var status = (r['Status'] || '').trim();
+    var rest   = String(r['Restaurant']||'').trim();
+    var status = String(r['Status']||'').trim();
+    var hours  = String(r['Operating Hours']||r['Hours']||'').trim();
     if (rest)   lastRest   = rest;
     if (status) lastStatus = status;
+    if (hours)  lastHours  = hours;
     return {
       rest:   lastRest,
       status: lastStatus,
-      meal:   (r['Meal Period / Service'] || r['Meal Period'] || '').trim(),
-      time:   (r['Timing'] || r['Time'] || '').trim(),
-      notes:  (r['Notes'] || r['Description'] || '').trim()
+      hours:  lastHours,
+      meal:   String(r['Meal Period / Service']||r['Meal Period']||'').trim(),
+      time:   String(r['Timing']||r['Time']||'').trim(),
+      notes:  String(r['Notes']||r['Description']||'').trim()
     };
   });
 
-  // Filter: remove closed, empty, and placeholder rows
   rows = rows.filter(function(r) {
-    return r.rest && r.meal
-      && r.status.toUpperCase() !== 'CLOSED'
+    return r.rest && r.meal && r.status.toUpperCase() !== 'CLOSED'
       && r.meal.indexOf('add details') === -1;
   });
 
   // Group by restaurant
   var groups = {}, order = [];
   rows.forEach(function(r) {
-    if (!groups[r.rest]) { groups[r.rest] = []; order.push(r.rest); }
-    groups[r.rest].push(r);
+    if (!groups[r.rest]) { groups[r.rest] = { hours: r.hours, items: [] }; order.push(r.rest); }
+    if (r.hours && !groups[r.rest].hours) groups[r.rest].hours = r.hours;
+    groups[r.rest].items.push(r);
   });
 
-  if (!order.length) return '<div class="sec-head">Dining &amp; Bars</div><div class="error-box"><div class="error-sub">No outlets currently open.</div></div>';
+  // Sort each restaurant's items by start time ascending
+  function parseStartTime(str) {
+    str = String(str||'').split('–')[0].split('-')[0].trim();
+    var m = str.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!m) return 9999;
+    var h = parseInt(m[1]), min = parseInt(m[2]), ampm = m[3].toUpperCase();
+    if (ampm === 'AM' && h === 12) h = 0;
+    if (ampm === 'PM' && h !== 12) h += 12;
+    return h * 60 + min;
+  }
+  order.forEach(function(name) {
+    groups[name].items.sort(function(a, b) { return parseStartTime(a.time) - parseStartTime(b.time); });
+  });
 
   var LINKS = {
     'Basilico':    'https://www.rotana.com/rotanahotelandresorts/unitedarabemirates/rasalkhaimah/thecoverotanaresort/diningout/basilicomediterraneanrestaurant',
@@ -436,30 +450,37 @@ function renderDining(rows) {
     'Room Service':'https://www.rotana.com/rotanahotelandresorts/unitedarabemirates/rasalkhaimah/thecoverotanaresort/dining'
   };
 
-  var cards = order.map(function(name) {
-    var items = groups[name];
-    var link  = LINKS[name] || '';
-    var tag   = link ? 'a class="card clickable" href="' + link + '" target="_blank" rel="noopener"' : 'div class="card"';
-    var close = link ? 'a' : 'div';
-    var arrow = link ? '<span class="ext-icon">↗</span>' : '';
+  if (!order.length) return '<div class="sec-head">Dining &amp; Bars</div><div class="error-box"><div class="error-sub">No outlets currently open.</div></div>';
 
-    var timeRows = items.map(function(r) {
-      var note = r.notes ? '<span class="time-note"> — ' + r.notes + '</span>' : '';
+  var cards = order.map(function(name) {
+    var g    = groups[name];
+    var link = LINKS[name] || '';
+    var tag  = link ? 'a class="card clickable" href="'+link+'" target="_blank" rel="noopener"' : 'div class="card"';
+    var cls  = link ? 'a' : 'div';
+    var arrow = link ? '<span class="ext-icon">&#8599;</span>' : '';
+
+    var hoursHtml = g.hours
+      ? '<div class="card-hours">'+g.hours+'</div>'
+      : '';
+
+    var timeRows = g.items.map(function(r) {
+      var note = r.notes ? '<span class="time-note"> &#8212; '+r.notes+'</span>' : '';
       return '<div class="time-row">'
-        + '<span class="time-label">' + r.meal + '</span>'
-        + '<span class="time-val">' + r.time + note + '</span>'
-        + '</div>';
+        +'<span class="time-label">'+r.meal+'</span>'
+        +'<span class="time-val">'+r.time+note+'</span>'
+        +'</div>';
     }).join('');
 
-    return '<' + tag + '>'
-      + '<div class="card-header"><div>'
-      + '<div class="card-name card-name-link">' + name + arrow + '</div>'
-      + '</div></div>'
-      + '<div class="time-rows">' + timeRows + '</div>'
-      + '</' + close + '>';
+    return '<'+tag+'>'
+      +'<div class="card-header"><div>'
+      +'<div class="card-name card-name-link">'+name+arrow+'</div>'
+      +hoursHtml
+      +'</div></div>'
+      +'<div class="time-rows">'+timeRows+'</div>'
+      +'</'+cls+'>';
   }).join('');
 
-  return '<div class="sec-head">Dining &amp; Bars</div><div class="card-grid">' + cards + '</div>';
+  return '<div class="sec-head">Dining &amp; Bars</div><div class="card-grid">'+cards+'</div>';
 }
 
 function renderOffers(rows) {
@@ -502,12 +523,17 @@ function renderOffers(rows) {
 }
 
 function renderPackages(rows) {
+  // Detect info/note rows (Restaurant column starts with bullet)
+  var infoRows = rows.filter(function(r) {
+    return String(r['Restaurant']||'').trim().charAt(0) === '•';
+  });
+
   // Build status map with fill-down
   var lastR = '', statusMap = {};
   rows.forEach(function(r) {
     var rest = String(r['Restaurant']||'').trim();
     var st   = String(r['Status']||'').trim();
-    if (rest) lastR = rest;
+    if (rest && rest.charAt(0) !== '•') lastR = rest;
     if (st && lastR) statusMap[lastR] = st;
   });
   var closed = {};
@@ -521,7 +547,7 @@ function renderPackages(rows) {
   rows.forEach(function(r) {
     var rest = String(r['Restaurant']||'').trim();
     var meal = String(r['Meal Period']||r['Meal Period / Service']||'').trim();
-    if (rest) lastR = rest;
+    if (rest && rest.charAt(0) !== '•') lastR = rest;
     if (!lastR || !meal || closed[lastR] || meal.indexOf('add details') !== -1) return;
     dataRows.push({
       rest: lastR, meal: meal,
@@ -532,8 +558,29 @@ function renderPackages(rows) {
     });
   });
 
+  // Sort each restaurant's rows by start time ascending
+  function parseStartTime(str) {
+    str = String(str||'').split('–')[0].split('-')[0].trim();
+    var m = str.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!m) return 9999;
+    var h = parseInt(m[1]), min = parseInt(m[2]), ampm = m[3].toUpperCase();
+    if (ampm === 'AM' && h === 12) h = 0;
+    if (ampm === 'PM' && h !== 12) h += 12;
+    return h * 60 + min;
+  }
+
   var restaurants = [], seen = {};
   dataRows.forEach(function(r) { if (!seen[r.rest]) { seen[r.rest]=true; restaurants.push(r.rest); } });
+
+  restaurants.forEach(function(name) {
+    var group = dataRows.filter(function(r){return r.rest===name;});
+    group.sort(function(a,b){ return parseStartTime(a.time) - parseStartTime(b.time); });
+    var idx = 0;
+    dataRows = dataRows.map(function(r) {
+      if (r.rest === name) { var s = group[idx++]; return s; }
+      return r;
+    });
+  });
 
   if (!restaurants.length) return '<div class="sec-head">Meal Packages</div><div class="error-box"><div class="error-sub">No packages currently available.</div></div>';
 
@@ -553,6 +600,17 @@ function renderPackages(rows) {
         }).join('');
   }).join('');
 
+  // Important notes info box
+  var infoHtml = '';
+  if (infoRows.length) {
+    infoHtml = '<div class="pkg-info-box">'
+      + '<div class="pkg-info-title">&#9888;&#65039; Important Information</div>'
+      + infoRows.map(function(r) {
+          return '<div class="pkg-info-item">'+String(r['Restaurant']||'').trim().replace(/^•\s*/,'')+'</div>';
+        }).join('')
+      + '</div>';
+  }
+
   return '<div class="sec-head">Meal Packages</div>'
     +'<div style="background:var(--white);border-radius:var(--radius);box-shadow:0 1px 3px rgba(0,0,0,.06);margin-bottom:.875rem;overflow:hidden">'
     +'<div style="font-size:11px;color:var(--text-light);padding:5px 12px;text-align:right;background:var(--sand);border-bottom:1px solid var(--sand-dark)">Slide for more &#187;</div>'
@@ -564,7 +622,7 @@ function renderPackages(rows) {
     +'<th style="padding:.65rem .875rem;color:#fff;font-weight:500;font-size:12px">Description</th>'
     +'<th style="padding:.65rem .875rem;font-weight:600;font-size:12px;text-align:center;background:linear-gradient(135deg,#8a9099,#BCC2C8,#E2E6EA,#BCC2C8,#8a9099);color:#2a2a2a;min-width:60px">AI</th>'
     +'<th style="padding:.65rem .875rem;font-weight:600;font-size:12px;text-align:center;background:linear-gradient(135deg,#B8860B,#DAA520,#F0D060,#DAA520,#B8860B);color:#5a3d00;min-width:60px">UAI</th>'
-    +'</tr></thead><tbody>'+tbody+'</tbody></table></div></div>';
+    +'</tr></thead><tbody>'+tbody+'</tbody></table></div></div>'+infoHtml;
 }
 
 function pkgScroll(el) { var hint = document.getElementById('pkgHint'); if (hint) hint.style.opacity = el.scrollLeft > 20 ? '0' : '1'; }
